@@ -1,0 +1,3 @@
+# Test-only neutral MCP server fixture (HTTP/SSE). Not shipped in registry/mcp/.
+name: example-url
+url: https://mcp.example.com/sse

@@ -1,0 +1,8 @@
+# Test-only neutral MCP server fixture (stdio). Not shipped in registry/mcp/.
+# Used by tests to exercise the Claude (JSON) and Codex (TOML) emitters.
+name: example
+command: npx
+arg: -y
+arg: @example/mcp-server
+env: API_KEY=secret123
+env: REGION=us-east-1

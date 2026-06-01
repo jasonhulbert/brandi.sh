@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Editors / IDEs
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Claude Code — local, per-user settings (not shared)
+.claude/settings.local.json
+
+# Local tool artifacts / scratch
+.jenny-pdf-viewer.txt
+*.log
+*.tmp
+*.plansh.tmp
