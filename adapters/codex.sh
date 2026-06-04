@@ -1,11 +1,13 @@
 # adapters/codex.sh — Codex harness adapter.
 #
-# Sourced by plan.sh. The Codex skills directory is not officially confirmed, so
-# this adapter PROBES for it at runtime and FAILS LOUD (non-zero, naming the
-# override) when it cannot be located — it never guesses or creates a directory.
-# See registry/FORMAT.md §6 for the adapter contract.
+# Sourced by brandi.sh. Codex stores user-level skills at $CODEX_HOME/skills
+# (CODEX_HOME defaults to ~/.codex); project-level skills are .codex/skills.
+# See https://developers.openai.com/codex/skills . This adapter resolves that
+# location (honoring CODEX_SKILLS_DIR / CODEX_HOME) and FAILS LOUD (non-zero,
+# naming the override) when it cannot be located — it never guesses or creates a
+# directory. See registry/FORMAT.md §6 for the adapter contract.
 
-# Consumed by plan.sh after sourcing (FORMAT.md §6); shellcheck can't see cross-file use.
+# Consumed by brandi.sh after sourcing (FORMAT.md §6); shellcheck can't see cross-file use.
 # shellcheck disable=SC2034
 ADAPTER_NAME=codex
 
@@ -14,14 +16,21 @@ adapter_detect() {
 	adapter_skills_dir >/dev/null 2>&1
 }
 
-# Absolute Codex skills root.
+# Absolute Codex skills root. Codex's user-level skills live at $CODEX_HOME/skills
+# (CODEX_HOME defaults to ~/.codex); see https://developers.openai.com/codex/skills .
 #   1. CODEX_SKILLS_DIR override always wins (the user opted in; created if absent).
-#   2. else an already-existing Codex skills dir is used as-is.
-#   3. else, if a Codex base dir exists (Codex is installed), derive <base>/skills.
-#   4. else fail loud — do not guess, do not create.
+#   2. else CODEX_HOME, if set, gives $CODEX_HOME/skills (Codex's own home override).
+#   3. else an already-existing Codex skills dir is used as-is.
+#   4. else, if a Codex base dir exists (Codex is installed), derive <base>/skills.
+#   5. else fail loud — do not guess, do not create.
 adapter_skills_dir() {
 	if [ -n "${CODEX_SKILLS_DIR:-}" ]; then
 		printf '%s\n' "$CODEX_SKILLS_DIR"
+		return 0
+	fi
+
+	if [ -n "${CODEX_HOME:-}" ]; then
+		printf '%s/skills\n' "$CODEX_HOME"
 		return 0
 	fi
 
@@ -41,7 +50,7 @@ adapter_skills_dir() {
 		fi
 	done
 
-	printf 'plan.sh: cannot locate the Codex skills directory; set CODEX_SKILLS_DIR to override (probed %s and %s)\n' \
+	printf 'brandi.sh: cannot locate the Codex skills directory; set CODEX_SKILLS_DIR or CODEX_HOME to override (probed %s and %s)\n' \
 		"$HOME/.codex" "$_xdg/codex" >&2
 	return 1
 }
@@ -65,4 +74,10 @@ adapter_mcp_target() {
 # Merge one neutral MCP server definition into the Codex config.
 adapter_mcp_emit() {
 	mcp_emit_codex "$1" "$(adapter_mcp_target)"
+}
+
+# Read one MCP server from the Codex MCP config into the neutral registry
+# format (used by ingest; the reverse of adapter_mcp_emit).
+adapter_mcp_read() {
+	mcp_read_codex "$1" "$(adapter_mcp_target)"
 }

@@ -1,15 +1,15 @@
 #!/bin/sh
-# plan.sh — multi-harness Agent Skills & MCP installer.
+# brandi.sh — multi-harness Agent Skills & MCP installer.
 #
 # Canonical registry + thin per-harness adapters (the shadcn / ui.sh model).
 # This file is the CLI entrypoint. See registry/FORMAT.md for the contract.
 #
-# plan.sh only copies files and substitutes placeholders. All judgment lives in
+# brandi.sh only copies files and substitutes placeholders. All judgment lives in
 # the skill markdown, never in shell.
 set -eu
 
-PROG=plan.sh
-VERSION=0.1.0-dev
+PROG=brandi.sh
+VERSION=0.2.0-dev
 TAB=$(printf '\t')
 
 # Render-control globals (set/cleared around render calls; declared for set -u).
@@ -29,21 +29,34 @@ die() {
 
 # --- root / state resolution ----------------------------------------------
 
-# Absolute path of the tool root (holding registry/ and adapters/).
-# PLAN_SH_ROOT wins (set by the installed launcher in Phase 7); otherwise the
+# Absolute path of the ENGINE root (adapters/ + the brandi.sh script; the user
+# registry lives under data_dir, not here). BRANDI_SH_ROOT wins; otherwise the
 # directory containing this script — correct both in-repo and when the bootstrap
 # installs the whole tree together.
-plan_sh_root() {
-	if [ -n "${PLAN_SH_ROOT:-}" ]; then
-		printf '%s\n' "$PLAN_SH_ROOT"
+brandi_sh_root() {
+	if [ -n "${BRANDI_SH_ROOT:-}" ]; then
+		printf '%s\n' "$BRANDI_SH_ROOT"
 		return 0
 	fi
 	CDPATH='' cd -- "$(dirname -- "$0")" && pwd
 }
 
-# Absolute path of the tool's state dir (records + backups), XDG-aware.
+# Absolute path of the user DATA dir: the registry (user content), the state
+# record, and backups/ all live here. Deliberately separate from the engine root
+# (brandi_sh_root) so the tool no longer ships the registry. BRANDI_SH_DATA
+# overrides (tests/dev); else $XDG_DATA_HOME/brandi.sh (~/.local/share/brandi.sh).
+data_dir() {
+	if [ -n "${BRANDI_SH_DATA:-}" ]; then
+		printf '%s\n' "$BRANDI_SH_DATA"
+		return 0
+	fi
+	printf '%s/brandi.sh\n' "${XDG_DATA_HOME:-$HOME/.local/share}"
+}
+
+# State record + backups live under the data dir (single-data-dir design), not a
+# separate XDG_STATE_HOME location.
 state_dir() {
-	printf '%s/plan.sh\n' "${XDG_STATE_HOME:-$HOME/.local/state}"
+	data_dir
 }
 
 state_file() {
@@ -68,6 +81,13 @@ sha256_of() {
 # Escape a string for safe use as a sed replacement with '|' as delimiter.
 sed_escape_repl() {
 	printf '%s' "$1" | sed 's/[\\&|]/\\&/g'
+}
+
+# Escape a string for safe use as a BRE sed *pattern* with '|' as delimiter.
+# Used by ingest to re-tokenize literal harness paths back into placeholders.
+# (Backslashes are not escaped — absolute home paths never contain them.)
+sed_escape_pat() {
+	printf '%s' "$1" | sed 's/[].[*^$|]/\\&/g'
 }
 
 # Resolve placeholders on stdin -> stdout.  Args: <shared_dir> <skills_dir>
@@ -147,7 +167,8 @@ _record() {
 # dirs unless RENDER_OUT_SKILLS/RENDER_OUT_SHARED override (used by doctor).
 render_skillset() {
 	_skillset=$1; _harness=$2
-	_root=$(plan_sh_root)
+	_root=$(brandi_sh_root)
+	_data=$(data_dir)
 
 	_adapter="$_root/adapters/$_harness.sh"
 	[ -f "$_adapter" ] || die "unknown harness '$_harness' (no adapter at $_adapter)"
@@ -156,7 +177,7 @@ render_skillset() {
 	[ "${ADAPTER_NAME:-}" = "$_harness" ] || \
 		die "adapter $_adapter declares ADAPTER_NAME='${ADAPTER_NAME:-}', expected '$_harness'"
 
-	_setdir="$_root/registry/skills/$_skillset"
+	_setdir="$_data/registry/skills/$_skillset"
 	_manifest="$_setdir/manifest"
 	[ -f "$_manifest" ] || die "unknown skillset '$_skillset' (no manifest at $_manifest)"
 
@@ -285,21 +306,21 @@ mcp_emit_claude() {
 	_name=$(mcp_field "$_srv" name)
 	[ -n "$_name" ] || die "mcp server $_srv has no 'name'"
 	mkdir -p "$(dirname -- "$_tgt")"
-	PLANSH_TGT="$_tgt" \
-	PLANSH_NAME="$_name" \
-	PLANSH_CMD="$(mcp_field "$_srv" command)" \
-	PLANSH_URL="$(mcp_field "$_srv" url)" \
-	PLANSH_ARGS="$(mcp_field "$_srv" arg)" \
-	PLANSH_ENV="$(mcp_field "$_srv" env)" \
+	BRANDISH_TGT="$_tgt" \
+	BRANDISH_NAME="$_name" \
+	BRANDISH_CMD="$(mcp_field "$_srv" command)" \
+	BRANDISH_URL="$(mcp_field "$_srv" url)" \
+	BRANDISH_ARGS="$(mcp_field "$_srv" arg)" \
+	BRANDISH_ENV="$(mcp_field "$_srv" env)" \
 	python3 - <<'PY'
 import json, os, sys
-tgt = os.environ["PLANSH_TGT"]
-name = os.environ["PLANSH_NAME"]
-cmd = os.environ.get("PLANSH_CMD", "")
-url = os.environ.get("PLANSH_URL", "")
-args = [a for a in os.environ.get("PLANSH_ARGS", "").split("\n") if a]
+tgt = os.environ["BRANDISH_TGT"]
+name = os.environ["BRANDISH_NAME"]
+cmd = os.environ.get("BRANDISH_CMD", "")
+url = os.environ.get("BRANDISH_URL", "")
+args = [a for a in os.environ.get("BRANDISH_ARGS", "").split("\n") if a]
 env = {}
-for e in [x for x in os.environ.get("PLANSH_ENV", "").split("\n") if x]:
+for e in [x for x in os.environ.get("BRANDISH_ENV", "").split("\n") if x]:
     k, _, v = e.partition("=")
     env[k] = v
 obj = {}
@@ -324,7 +345,7 @@ except FileNotFoundError:
 if not isinstance(data, dict):
     sys.exit("existing %s is not a JSON object" % tgt)
 data.setdefault("mcpServers", {})[name] = obj
-tmp = tgt + ".plansh.tmp"
+tmp = tgt + ".brandish.tmp"
 with open(tmp, "w") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
@@ -396,15 +417,83 @@ mcp_emit_codex() {
 	rm -f "$_block"
 }
 
+# Read one MCP server from a Claude JSON config, emitting the neutral registry
+# format (FORMAT.md §7) to stdout; exits non-zero if the server is absent. The
+# reverse of mcp_emit_claude. Args: <name> <config>
+mcp_read_claude() {
+	BRANDISH_NAME="$1" BRANDISH_CFG="$2" python3 - <<'PY'
+import json, os, sys
+name = os.environ["BRANDISH_NAME"]
+cfg = os.environ["BRANDISH_CFG"]
+try:
+    with open(cfg) as f:
+        data = json.load(f)
+except Exception as e:
+    sys.exit("ingest: cannot parse %s: %s" % (cfg, e))
+servers = data.get("mcpServers", {}) if isinstance(data, dict) else {}
+srv = servers.get(name)
+if not isinstance(srv, dict):
+    sys.exit("ingest: mcp server '%s' not found in %s" % (name, cfg))
+out = ["name: " + name]
+if "command" in srv:
+    out.append("command: " + str(srv["command"]))
+    for a in srv.get("args", []) or []:
+        out.append("arg: " + str(a))
+    for k, v in (srv.get("env", {}) or {}).items():
+        out.append("env: %s=%s" % (k, v))
+elif "url" in srv:
+    out.append("url: " + str(srv["url"]))
+else:
+    sys.exit("ingest: mcp server '%s' has neither command nor url" % name)
+sys.stdout.write("\n".join(out) + "\n")
+PY
+}
+
+# Read one MCP server from a Codex TOML config, emitting the neutral registry
+# format (FORMAT.md §7) to stdout; exits non-zero if absent. Needs Python >=3.11
+# (tomllib) per the plan's scoping decision. The reverse of mcp_emit_codex.
+# Args: <name> <config>
+mcp_read_codex() {
+	BRANDISH_NAME="$1" BRANDISH_CFG="$2" python3 - <<'PY'
+import os, sys
+try:
+    import tomllib
+except ModuleNotFoundError:
+    sys.exit("ingest: reading Codex TOML needs Python >=3.11 (tomllib unavailable)")
+name = os.environ["BRANDISH_NAME"]
+cfg = os.environ["BRANDISH_CFG"]
+try:
+    with open(cfg, "rb") as f:
+        data = tomllib.load(f)
+except Exception as e:
+    sys.exit("ingest: cannot parse %s: %s" % (cfg, e))
+srv = data.get("mcp_servers", {}).get(name)
+if not isinstance(srv, dict):
+    sys.exit("ingest: mcp server '%s' not found in %s" % (name, cfg))
+out = ["name: " + name]
+if "command" in srv:
+    out.append("command: " + str(srv["command"]))
+    for a in srv.get("args", []) or []:
+        out.append("arg: " + str(a))
+    for k, v in (srv.get("env", {}) or {}).items():
+        out.append("env: %s=%s" % (k, v))
+elif "url" in srv:
+    out.append("url: " + str(srv["url"]))
+else:
+    sys.exit("ingest: mcp server '%s' has neither command nor url" % name)
+sys.stdout.write("\n".join(out) + "\n")
+PY
+}
+
 # Emit every MCP server a skillset declares. Args: <harness> <skillset>
 # (the harness adapter must already be sourced).
 _emit_mcp() {
-	_root=$(plan_sh_root)
+	_data=$(data_dir)
 	_servers=$(mktemp)
 	manifest_field "$2" mcp > "$_servers"
 	while IFS= read -r _srv <&5; do
 		case "$_srv" in ''|none) continue ;; esac
-		_srvfile="$_root/registry/mcp/$_srv"
+		_srvfile="$_data/registry/mcp/$_srv"
 		[ -f "$_srvfile" ] || die "skillset '$2' declares mcp '$_srv' but registry/mcp/$_srv is missing"
 		adapter_mcp_emit "$_srvfile"
 		printf '%s: emitted MCP server "%s" for harness "%s"\n' "$PROG" "$_srv" "$1"
@@ -415,9 +504,9 @@ _emit_mcp() {
 # --- registry / harness / state helpers -----------------------------------
 
 list_skillsets() {
-	_root=$(plan_sh_root)
-	[ -d "$_root/registry/skills" ] || return 0
-	for _d in "$_root"/registry/skills/*/; do
+	_data=$(data_dir)
+	[ -d "$_data/registry/skills" ] || return 0
+	for _d in "$_data"/registry/skills/*/; do
 		[ -f "${_d}manifest" ] || continue
 		_b=${_d%/}
 		printf '%s\n' "${_b##*/}"
@@ -427,8 +516,8 @@ list_skillsets() {
 
 # Echo values for a manifest key. Args: <skillset> <key>
 manifest_field() {
-	_root=$(plan_sh_root)
-	_m="$_root/registry/skills/$1/manifest"
+	_data=$(data_dir)
+	_m="$_data/registry/skills/$1/manifest"
 	[ -f "$_m" ] || return 0
 	while IFS= read -r _ln; do
 		case "$_ln" in ''|\#*) continue ;; esac
@@ -440,7 +529,7 @@ manifest_field() {
 }
 
 list_adapters() {
-	_root=$(plan_sh_root)
+	_root=$(brandi_sh_root)
 	for _f in "$_root"/adapters/*.sh; do
 		[ -f "$_f" ] || continue
 		_b=${_f##*/}
@@ -451,7 +540,7 @@ list_adapters() {
 
 # True (0) if the harness appears installed on this machine.
 harness_detected() {
-	_root=$(plan_sh_root)
+	_root=$(brandi_sh_root)
 	_a="$_root/adapters/$1.sh"
 	[ -f "$_a" ] || return 1
 	# shellcheck disable=SC1090
@@ -491,13 +580,14 @@ cmd_install() {
 			*) die "install: unknown option '$1'" ;;
 		esac
 	done
-	_root=$(plan_sh_root)
+	_root=$(brandi_sh_root)
+	_data=$(data_dir)
 
 	_ss=$(mktemp)
 	if [ -n "$_sarg" ]; then _split_csv "$_sarg" > "$_ss"; else list_skillsets > "$_ss"; fi
 	[ -s "$_ss" ] || { rm -f "$_ss"; die "no skillsets to install (registry is empty)"; }
 	while IFS= read -r _s <&6; do
-		[ -f "$_root/registry/skills/$_s/manifest" ] || die "no such skillset '$_s'"
+		[ -f "$_data/registry/skills/$_s/manifest" ] || die "no such skillset '$_s'"
 	done 6< "$_ss"
 
 	_hs=$(mktemp)
@@ -549,8 +639,8 @@ cmd_list() {
 cmd_add() {
 	[ "$#" -ge 1 ] || die "usage: $PROG add <skillset>"
 	_s=$1
-	_root=$(plan_sh_root)
-	[ -f "$_root/registry/skills/$_s/manifest" ] || die "no such skillset '$_s'"
+	_data=$(data_dir)
+	[ -f "$_data/registry/skills/$_s/manifest" ] || die "no such skillset '$_s'"
 	_sf=$(state_file)
 	[ -f "$_sf" ] || die "nothing installed yet; run '$PROG install' first"
 	_hs=$(mktemp); state_harnesses > "$_hs"
@@ -575,7 +665,7 @@ cmd_sync() {
 
 cmd_doctor() {
 	_sf=$(state_file)
-	_root=$(plan_sh_root)
+	_root=$(brandi_sh_root)
 	if [ ! -f "$_sf" ]; then printf '%s: doctor: nothing installed (no state). clean.\n' "$PROG"; return 0; fi
 
 	_pairs=$(mktemp); awk -F'\t' '{print $1"\t"$2}' "$_sf" | sort -u > "$_pairs"
@@ -686,11 +776,153 @@ cmd_uninstall() {
 	printf '%s: uninstall complete (removed %d, restored %d).\n' "$PROG" "$_removed" "$_restored"
 }
 
+# --- ingest (reverse render) ----------------------------------------------
+
+# Reverse-render one file from a harness install back into canonical form:
+# re-tokenize the harness's shared/skills absolute paths into placeholders
+# (best-effort; an unmatched path is copied verbatim) and normalize the
+# frontmatter key skill_name: -> name:. Args: <src> <dst> <shared_dir> <skills_dir>
+reverse_render_file() {
+	_src=$1; _dst=$2; _sh=$3; _kd=$4
+	_shp=$(sed_escape_pat "$_sh")
+	_kdp=$(sed_escape_pat "$_kd")
+	_t=$(mktemp) || die "mktemp failed"
+	# The shared dir is a sub-path of the skills dir, so tokenize it first so the
+	# longer/more-specific match wins.
+	sed -e "s|$_shp|{{SHARED_DIR}}|g" -e "s|$_kdp|{{SKILLS_DIR}}|g" "$_src" > "$_t"
+	awk '
+		/^---$/ { f++ }
+		f<=1 && !done && /^skill_name:/ { sub(/^skill_name:/, "name:"); done=1 }
+		{ print }
+	' "$_t" > "$_dst"
+	rm -f "$_t"
+}
+
+# Ensure a skillset manifest exists (created with skillset: + description: on
+# first ingest; an existing manifest is left untouched). Args: <setdir> <skillset>
+manifest_ensure() {
+	[ -f "$1/manifest" ] && return 0
+	mkdir -p "$1"
+	printf 'skillset: %s\ndescription: ingested skillset %s\n' "$2" "$2" > "$1/manifest"
+}
+
+# Append "key: value" to a manifest unless that exact line already exists
+# (idempotent merge). Args: <manifest> <key> <value>
+manifest_append() {
+	_line="$2: $3"
+	[ -f "$1" ] && grep -qxF "$_line" "$1" && return 0
+	printf '%s\n' "$_line" >> "$1"
+}
+
+# Ingest one skill from a harness into the data-dir registry skillset.
+# Args: <harness> <skillset> <skill> <h_skills_dir> <h_shared_dir> <setdir>
+ingest_skill() {
+	_h=$1; _set=$2; _sk=$3; _hskills=$4; _hshared=$5; _setdir=$6
+	_srcdir="$_hskills/$_sk"
+	[ -d "$_srcdir" ] || die "ingest: skill '$_sk' not found in harness '$_h' ($_srcdir)"
+	_dstdir="$_setdir/$_sk"
+	mkdir -p "$_dstdir"
+
+	_list=$(mktemp) || die "mktemp failed"
+	find "$_srcdir" -type f > "$_list"
+	while IFS= read -r _srcf <&8; do
+		_rel=${_srcf#"$_srcdir"/}
+		_dstf="$_dstdir/$_rel"
+		mkdir -p "$(dirname -- "$_dstf")"
+		reverse_render_file "$_srcf" "$_dstf" "$_hshared" "$_hskills"
+	done 8< "$_list"
+	rm -f "$_list"
+
+	manifest_ensure "$_setdir" "$_set"
+	manifest_append "$_setdir/manifest" skill "$_sk"
+	printf '%s: ingested skill "%s" from "%s" -> %s\n' "$PROG" "$_sk" "$_h" "$_dstdir"
+}
+
+# Ingest one MCP server from a harness config into the data-dir registry and
+# wire it into the skillset manifest (the adapter must already be sourced).
+# Args: <harness> <skillset> <server> <setdir> <mcpdir>
+ingest_mcp() {
+	_h=$1; _set=$2; _srv=$3; _setdir=$4; _mcpdir=$5
+	_neutral=$(adapter_mcp_read "$_srv") || \
+		die "ingest: could not read mcp server '$_srv' from harness '$_h'"
+	[ -n "$_neutral" ] || die "ingest: mcp server '$_srv' produced an empty definition"
+	mkdir -p "$_mcpdir"
+	printf '%s\n' "$_neutral" > "$_mcpdir/$_srv"
+	manifest_ensure "$_setdir" "$_set"
+	manifest_append "$_setdir/manifest" mcp "$_srv"
+	printf '%s: ingested mcp server "%s" from "%s" -> %s\n' "$PROG" "$_srv" "$_h" "$_mcpdir/$_srv"
+}
+
+# ingest: reverse-render a harness's skills and MCP servers into the user's
+# data-dir registry, in canonical placeholder form.
+cmd_ingest() {
+	_harg=''; _set=''; _skills=''; _mcps=''
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--harness)    [ "$#" -ge 2 ] || die "ingest: --harness needs a value"; _harg=$2; shift 2 ;;
+			--harness=*)  _harg=${1#*=}; shift ;;
+			--skillset)   [ "$#" -ge 2 ] || die "ingest: --skillset needs a value"; _set=$2; shift 2 ;;
+			--skillset=*) _set=${1#*=}; shift ;;
+			--skill)      [ "$#" -ge 2 ] || die "ingest: --skill needs a value"; _skills=$2; shift 2 ;;
+			--skill=*)    _skills=${1#*=}; shift ;;
+			--mcp)        [ "$#" -ge 2 ] || die "ingest: --mcp needs a value"; _mcps=$2; shift 2 ;;
+			--mcp=*)      _mcps=${1#*=}; shift ;;
+			-h|--help)    printf 'usage: %s ingest --harness <h> --skillset <set> [--skill a,b] [--mcp x,y]\n' "$PROG"; return 0 ;;
+			*) die "ingest: unknown option '$1'" ;;
+		esac
+	done
+
+	[ -n "$_harg" ] || die "ingest: --harness <h> is required"
+	[ -n "$_set" ]  || die "ingest: --skillset <set> is required"
+	[ -n "$_skills" ] || [ -n "$_mcps" ] || \
+		die "ingest: give at least one of --skill <csv> or --mcp <csv>"
+
+	# Adapter (harness conventions) loads from the engine root; output goes to the
+	# user data-dir registry.
+	_root=$(brandi_sh_root)
+	_adapter="$_root/adapters/$_harg.sh"
+	[ -f "$_adapter" ] || die "ingest: unknown harness '$_harg' (no adapter at $_adapter)"
+	# shellcheck disable=SC1090
+	. "$_adapter"
+	[ "${ADAPTER_NAME:-}" = "$_harg" ] || \
+		die "ingest: adapter $_adapter declares ADAPTER_NAME='${ADAPTER_NAME:-}', expected '$_harg'"
+
+	_data=$(data_dir)
+	_setdir="$_data/registry/skills/$_set"
+	_hskills=$(adapter_skills_dir) || die "ingest: cannot locate '$_harg' skills dir"
+	_hshared=$(adapter_shared_dir "$_set")
+
+	if [ -n "$_skills" ]; then
+		_sl=$(mktemp) || die "mktemp failed"
+		_split_csv "$_skills" > "$_sl"
+		while IFS= read -r _sk <&7; do
+			ingest_skill "$_harg" "$_set" "$_sk" "$_hskills" "$_hshared" "$_setdir"
+		done 7< "$_sl"
+		rm -f "$_sl"
+	fi
+
+	if [ -n "$_mcps" ]; then
+		command -v python3 >/dev/null 2>&1 || \
+			die "ingest: --mcp needs python3 to read the harness MCP config (none found)"
+		_mcptarget=$(adapter_mcp_target)
+		[ -f "$_mcptarget" ] || die "ingest: $_harg MCP config not found: $_mcptarget"
+		_mcpdir="$_data/registry/mcp"
+		_ml=$(mktemp) || die "mktemp failed"
+		_split_csv "$_mcps" > "$_ml"
+		while IFS= read -r _mc <&7; do
+			ingest_mcp "$_harg" "$_set" "$_mc" "$_setdir" "$_mcpdir"
+		done 7< "$_ml"
+		rm -f "$_ml"
+	fi
+
+	printf '%s: ingest complete; skillset "%s" registry at %s\n' "$PROG" "$_set" "$_setdir"
+}
+
 # --- help / dispatch -------------------------------------------------------
 
 usage() {
 	cat <<EOF
-plan.sh — install & sync Agent Skills and MCP servers across coding-agent harnesses.
+brandi.sh — install & sync Agent Skills and MCP servers across coding-agent harnesses.
 
 Usage: ${PROG} <command> [options]
 
@@ -701,6 +933,7 @@ Commands:
   sync        Re-render to reconcile installed outputs with the registry
   doctor      Report drift and missing harness dirs (non-zero on problems)
   uninstall   Remove rendered files this tool created; restore backups
+  ingest      Reverse-render a harness's skills/MCP into your registry
 
 Options:
   -h, --help     Show this help and exit
@@ -721,6 +954,7 @@ main() {
 		sync)       cmd_sync "$@" ;;
 		doctor)     cmd_doctor "$@" ;;
 		uninstall)  cmd_uninstall "$@" ;;
+		ingest)     cmd_ingest "$@" ;;
 		_render)
 			# Internal: render a skillset into a harness without touching state.
 			[ "$#" -ge 2 ] || die "usage: $PROG _render <skillset> <harness>"

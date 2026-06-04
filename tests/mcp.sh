@@ -2,7 +2,7 @@
 # tests/mcp.sh — exercise the MCP emitters against the test fixtures.
 #
 # Runs the Claude (JSON) and Codex (TOML) emitters on tests/fixtures/mcp/* via
-# the internal `plan.sh _mcp` command and asserts the merged output, including
+# the internal `brandi.sh _mcp` command and asserts the merged output, including
 # that merging preserves unrelated servers/tables. The Claude (JSON) checks need
 # python3 (as the Claude emitter itself does) and are skipped with a note if it
 # is absent; the Codex (TOML) checks need no extra tools and always run.
@@ -10,7 +10,7 @@ set -u
 
 REPO=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 FIX="$REPO/tests/fixtures/mcp"
-PSH="$REPO/plan.sh"
+PSH="$REPO/brandi.sh"
 
 pass=0
 fail=0

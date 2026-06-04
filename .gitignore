@@ -18,4 +18,4 @@
 .jenny-pdf-viewer.txt
 *.log
 *.tmp
-*.plansh.tmp
+*.brandish.tmp

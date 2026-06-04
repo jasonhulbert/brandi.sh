@@ -1,11 +1,11 @@
 # adapters/claude.sh — Claude Code harness adapter.
 #
-# Sourced by plan.sh. Defines where Claude keeps skills and MCP config, how the
+# Sourced by brandi.sh. Defines where Claude keeps skills and MCP config, how the
 # skillset's shared dir is named, and the frontmatter key Claude expects.
 # See registry/FORMAT.md §6 for the adapter contract. Functions echo their
 # result to stdout and fail loud (non-zero) when they cannot satisfy a request.
 
-# Consumed by plan.sh after sourcing (FORMAT.md §6); shellcheck can't see cross-file use.
+# Consumed by brandi.sh after sourcing (FORMAT.md §6); shellcheck can't see cross-file use.
 # shellcheck disable=SC2034
 ADAPTER_NAME=claude
 
@@ -41,4 +41,10 @@ adapter_mcp_target() {
 # Merge one neutral MCP server definition into the Claude MCP config.
 adapter_mcp_emit() {
 	mcp_emit_claude "$1" "$(adapter_mcp_target)"
+}
+
+# Read one MCP server from the Claude MCP config into the neutral registry
+# format (used by ingest; the reverse of adapter_mcp_emit).
+adapter_mcp_read() {
+	mcp_read_claude "$1" "$(adapter_mcp_target)"
 }
