@@ -566,6 +566,13 @@ _split_csv() {
 	printf '%s' "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' || true
 }
 
+has_glob_chars() {
+	case "$1" in
+		*'*'*|*'?'*|*'['*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
 # --- subcommands -----------------------------------------------------------
 
 cmd_install() {
@@ -814,6 +821,32 @@ manifest_append() {
 	printf '%s\n' "$_line" >> "$1"
 }
 
+# Expand one --skill selector. Exact names pass through; shell-style patterns
+# match direct child directories of the harness skills root.
+# Args: <harness> <skills_dir> <selector>
+expand_skill_selector() {
+	_h=$1; _hskills=$2; _sel=$3
+
+	if ! has_glob_chars "$_sel"; then
+		printf '%s\n' "$_sel"
+		return 0
+	fi
+
+	_found=0
+	for _dir in "$_hskills"/*; do
+		[ -d "$_dir" ] || continue
+		_name=${_dir##*/}
+		case "$_name" in
+			$_sel)
+				printf '%s\n' "$_name"
+				_found=1
+				;;
+		esac
+	done
+
+	[ "$_found" = 1 ] || die "ingest: skill pattern '$_sel' matched no skills in harness '$_h' ($_hskills)"
+}
+
 # Ingest one skill from a harness into the data-dir registry skillset.
 # Args: <harness> <skillset> <skill> <h_skills_dir> <h_shared_dir> <setdir>
 ingest_skill() {
@@ -894,7 +927,12 @@ cmd_ingest() {
 
 	if [ -n "$_skills" ]; then
 		_sl=$(mktemp) || die "mktemp failed"
-		_split_csv "$_skills" > "$_sl"
+		_rawsl=$(mktemp) || die "mktemp failed"
+		_split_csv "$_skills" > "$_rawsl"
+		while IFS= read -r _sel <&7; do
+			expand_skill_selector "$_harg" "$_hskills" "$_sel"
+		done 7< "$_rawsl" > "$_sl"
+		rm -f "$_rawsl"
 		while IFS= read -r _sk <&7; do
 			ingest_skill "$_harg" "$_set" "$_sk" "$_hskills" "$_hshared" "$_setdir"
 		done 7< "$_sl"

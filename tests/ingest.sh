@@ -48,6 +48,17 @@ Shared contract: $CLAUDE_SKILLS_DIR/foo-kit-shared/CONTRACT.md
 Skills root: $CLAUDE_SKILLS_DIR
 EOF
 
+for skill in obsidian-notes obsidian-search plan-task; do
+	mkdir -p "$CLAUDE_SKILLS_DIR/$skill"
+	cat > "$CLAUDE_SKILLS_DIR/$skill/SKILL.md" <<EOF
+---
+name: $skill
+description: $skill fixture
+---
+# $skill
+EOF
+done
+
 printf '== ingest a claude skill into the data-dir registry ==\n'
 if sh "$PSH" ingest --harness claude --skill foo-task --skillset foo-kit >/dev/null 2>&1; then
 	ok "ingest exits 0"
@@ -63,6 +74,33 @@ if [ -f "$REG/skills/foo-kit/manifest" ] && grep -qxF 'skill: foo-task' "$REG/sk
 	ok "manifest has 'skill: foo-task'"
 else
 	no "manifest missing skill line"
+fi
+
+printf '== ingest claude skills by pattern ==\n'
+if sh "$PSH" ingest --harness claude --skill 'obsidian-*' --skillset obsidian-kit >/dev/null 2>&1; then
+	ok "pattern ingest exits 0"
+else
+	no "pattern ingest failed"
+fi
+if [ -f "$REG/skills/obsidian-kit/obsidian-notes/SKILL.md" ] && [ -f "$REG/skills/obsidian-kit/obsidian-search/SKILL.md" ]; then
+	ok "pattern-matched skills created"
+else
+	no "pattern-matched skills missing"
+fi
+if [ ! -e "$REG/skills/obsidian-kit/plan-task" ]; then
+	ok "pattern skipped non-matching skill"
+else
+	no "pattern ingested non-matching skill"
+fi
+if grep -qxF 'skill: obsidian-notes' "$REG/skills/obsidian-kit/manifest" && grep -qxF 'skill: obsidian-search' "$REG/skills/obsidian-kit/manifest"; then
+	ok "pattern manifest has matched skills"
+else
+	no "pattern manifest missing matched skills"
+fi
+if sh "$PSH" ingest --harness claude --skill 'missing-*' --skillset obsidian-kit >/dev/null 2>&1; then
+	no "ingest of a non-matching pattern should fail"
+else
+	ok "non-matching pattern fails (non-zero)"
 fi
 
 printf '== re-ingest is idempotent ==\n'
