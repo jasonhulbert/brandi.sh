@@ -207,12 +207,15 @@ Reads named skills and/or MCP servers **out of** harness `<h>` and writes them
 into your registry, in canonical form, under skillset `<set>`. `--harness` and
 `--skillset` are required, and you must give at least one of `--skill` / `--mcp`.
 
-- `--skill <csv>` — copy each skill's file tree from the harness into
+- `--skill <csv>` — copy each named skill's file tree from the harness into
   `registry/skills/<set>/<skill>/`, normalize the frontmatter key to `name:`
   (legacy `skill_name:` is handled), and re-tokenize the harness's shared/skills
   absolute paths back into `{{SHARED_DIR}}` / `{{SKILLS_DIR}}` (best-effort;
   anything unrecognized is copied verbatim). The skillset `manifest` is created
-  or merged (a `skill:` line is appended if missing).
+  or merged (a `skill:` line is appended if missing). Each comma-separated value
+  may also be a shell-style pattern matched against direct child skill
+  directories, such as `--skill 'obsidian-*'`; quote patterns so your shell does
+  not expand them first.
 - `--mcp <csv>` — read each named server from the harness's MCP config
   (Claude `~/.mcp.json`; Codex `~/.codex/config.toml`) and write a neutral
   `registry/mcp/<name>` file, then wire `mcp: <name>` into the skillset manifest.
